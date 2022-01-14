@@ -27,6 +27,8 @@ type options struct {
 	password      string
 	esURL         string
 	kibanaURL     string
+	kibanaVersion string
+	tsFieldName   string
 	namespace     string
 	filter        string
 	skipDotPrefix bool
@@ -57,6 +59,8 @@ func newRegsiterPatternCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&o.password, "password", "p", "", "Password for user")
 	cmd.Flags().StringVar(&o.esURL, "es-url", "", "Elasticsearch URL")
 	cmd.Flags().StringVar(&o.kibanaURL, "kibana-url", "", "Kibana URL")
+	cmd.Flags().StringVar(&o.kibanaVersion, "kibana-version", "7.14.2", "Kibana version for in HTTP request header")
+	cmd.Flags().StringVar(&o.tsFieldName, "ts", "@timestamp", "Fieldname of timestamp")
 	cmd.Flags().StringVarP(&o.namespace, "namespace", "n", "default", "Kibana namespace")
 	cmd.Flags().StringVarP(&o.filter, "filter", "f", "", "Regexp pattern to filter, usually used to match prefix")
 	cmd.Flags().BoolVar(&o.skipDotPrefix, "skip-dot-prefix", true, "Skip indices with `.` prefix")
@@ -94,7 +98,7 @@ func runRegisterPatterns(o *options) (err error) {
 		return fmt.Errorf("fetch indices: %s", err)
 	}
 	for i := range indicePatterns {
-		if err = cli.registerPattern(o.namespace, indicePatterns[i], o.dryRun); err != nil {
+		if err = cli.registerPattern(o.namespace, indicePatterns[i], o.kibanaVersion, o.tsFieldName, o.dryRun); err != nil {
 			return err
 		}
 		log.GetLogger().Infof("register index pattern for %s", indicePatterns[i])
@@ -174,12 +178,15 @@ func (c *client) listIndicePatterns(skipDotPrefix bool, filterPatternReg *regexp
 	return patterns, nil
 }
 
-func (c *client) registerPattern(namespace string, s string, dryRun bool) error {
+func (c *client) registerPattern(namespace string, s string, kbnVer string, tsFieldName string, dryRun bool) error {
+	if tsFieldName == "" {
+		tsFieldName = "@timestamp"
+	}
 	c.kibanaURL.Path = fmt.Sprintf("/s/%s/api/saved_objects/index-pattern/%s", namespace, s)
 	pl := map[string]interface{}{
 		"attributes": map[string]string{
 			"title":         fmt.Sprintf("%s-*", s),
-			"timeFieldName": "@timestamp",
+			"timeFieldName": tsFieldName,
 		},
 	}
 	b, err := json.Marshal(&pl)
@@ -190,7 +197,7 @@ func (c *client) registerPattern(namespace string, s string, dryRun bool) error 
 	if err != nil {
 		return err
 	}
-	req.Header.Add("kbn-version", "7.12.0")
+	req.Header.Add("kbn-version", kbnVer)
 	c.setBasicAuthIfRequired(req)
 	if dryRun {
 		return nil
@@ -216,7 +223,7 @@ func (c *client) registerPattern(namespace string, s string, dryRun bool) error 
 	if err != nil {
 		return err
 	}
-	if resp.StatusCode/100 > 4 {
+	if resp.StatusCode/100 >= 4 {
 		return fmt.Errorf("unexpected error: %s", string(body))
 	}
 	return nil
