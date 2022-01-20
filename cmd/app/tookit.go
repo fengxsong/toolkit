@@ -21,7 +21,7 @@ func newRootCommand() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
-	cmd.PersistentFlags().BoolVar(&dev, "dev", true, "enable dev mode(logging with dev format)")
+	cmd.PersistentFlags().BoolVar(&dev, "dev", false, "enable dev mode(logging with dev format)")
 	cmd.AddCommand(factory.Registered()...)
 	cmd.AddCommand(newVersionCommand())
 	return cmd
