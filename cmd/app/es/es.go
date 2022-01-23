@@ -30,6 +30,7 @@ type commonOptions struct {
 	kibanaURL     string
 	kibanaVersion string
 	dryRun        bool
+	timeout       time.Duration
 }
 
 func (o *commonOptions) setDefaults() {
@@ -47,22 +48,27 @@ func (o *commonOptions) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.esURL, "es-url", "", "Elasticsearch URL")
 	fs.StringVar(&o.kibanaURL, "kibana-url", "", "Kibana URL")
 	fs.StringVar(&o.kibanaVersion, "kibana-version", "7.14.2", "Kibana version for in HTTP request header")
-	fs.BoolVar(&o.dryRun, "dry-run", false, "Simulate register but not actually run")
+	fs.BoolVar(&o.dryRun, "dry-run", false, "Simulate but not actually run")
+	fs.DurationVar(&o.timeout, "timeout", 10*time.Second, "Http client timeout")
 }
 
 func (o *commonOptions) complete() (c *client, err error) {
 	c = &client{
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: o.timeout},
 		username:   o.username,
 		password:   o.password,
 		kbnVer:     o.kibanaVersion,
 		dryRun:     o.dryRun,
 	}
-	if c.esURL, err = url.Parse(o.esURL); err != nil {
-		return nil, err
+	if len(o.esURL) > 0 {
+		if c.esURL, err = url.Parse(o.esURL); err != nil {
+			return nil, err
+		}
 	}
-	if c.kibanaURL, err = url.Parse(o.kibanaURL); err != nil {
-		return nil, err
+	if len(o.kibanaURL) > 0 {
+		if c.kibanaURL, err = url.Parse(o.kibanaURL); err != nil {
+			return nil, err
+		}
 	}
 	if err = c.validate(); err != nil {
 		return nil, err
@@ -98,6 +104,7 @@ func (c *client) doRequest(method, url string, data io.Reader, dryRun bool) ([]b
 	req.Header.Add("kbn-version", c.kbnVer)
 	c.setBasicAuthIfRequired(req)
 	if dryRun {
+		log.GetLogger().Infof("dryrun %s request to %s", method, url)
 		return nil, nil
 	}
 	delay := 500 * time.Microsecond
@@ -133,5 +140,6 @@ func newSubCommand() *cobra.Command {
 	}
 	cmd.AddCommand(newCreatePatternCommand())
 	cmd.AddCommand(newDeletePatternCommand())
+	cmd.AddCommand(newBulkRequestCommand())
 	return cmd
 }

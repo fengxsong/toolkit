@@ -30,6 +30,7 @@ func newDeletePatternCommand() *cobra.Command {
 		},
 	}
 	o.AddFlags(cmd.Flags())
+	cmd.MarkFlagRequired("kibana-url")
 	cmd.Flags().StringVarP(&o.namespace, "namespace", "n", "default", "Kibana namespace")
 
 	return cmd

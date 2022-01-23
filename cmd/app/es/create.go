@@ -51,6 +51,8 @@ func newCreatePatternCommand() *cobra.Command {
 		},
 	}
 	o.AddFlags(cmd.Flags())
+	cmd.MarkFlagRequired("es-url")
+	cmd.MarkFlagRequired("kibana-url")
 	cmd.Flags().StringVar(&o.tsFieldName, "ts", "@timestamp", "Fieldname of timestamp")
 	cmd.Flags().StringVarP(&o.namespace, "namespace", "n", "default", "Kibana namespace")
 	cmd.Flags().StringVarP(&o.filter, "filter", "f", "", "Regexp pattern to filter, usually used to match prefix")
