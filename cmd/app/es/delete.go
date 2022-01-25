@@ -23,10 +23,10 @@ func newDeletePatternCommand() *cobra.Command {
 		Use:     "delete",
 		Aliases: []string{"remove"},
 		Short:   "Remove index pattern[s] in kibana",
-		Args:    cobra.ExactArgs(1),
+		Args:    cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			o.setDefaults()
-			return runDeletePatterns(o, args...)
+			return o.Run(args...)
 		},
 	}
 	o.AddFlags(cmd.Flags())
@@ -36,7 +36,7 @@ func newDeletePatternCommand() *cobra.Command {
 	return cmd
 }
 
-func runDeletePatterns(o *deleteOptions, patterns ...string) error {
+func (o *deleteOptions) Run(patterns ...string) error {
 	cli, err := o.complete()
 	if err != nil {
 		return err

@@ -47,7 +47,7 @@ func newCreatePatternCommand() *cobra.Command {
 		Short:   "Create index pattern[s] in kibana",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			o.setDefaults()
-			return runCreatePatterns(o)
+			return o.Run()
 		},
 	}
 	o.AddFlags(cmd.Flags())
@@ -63,7 +63,7 @@ func newCreatePatternCommand() *cobra.Command {
 	return cmd
 }
 
-func runCreatePatterns(o *createOptions) (err error) {
+func (o *createOptions) Run() (err error) {
 	cli, err := o.commonOptions.complete()
 	if err != nil {
 		return err

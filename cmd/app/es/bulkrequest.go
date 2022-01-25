@@ -20,6 +20,7 @@ import (
 type bulkRequestOptions struct {
 	*commonOptions
 	concurrency int
+	serial      bool
 }
 
 func newBulkRequestCommand() *cobra.Command {
@@ -29,15 +30,16 @@ func newBulkRequestCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bulk",
 		Short: "Perform bulkrequests to elasticsearch",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			o.setDefaults()
-			return runBulkRequests(o, args...)
+			return o.Run(args...)
 		},
 	}
 	o.AddFlags(cmd.Flags())
 	cmd.MarkFlagRequired("es-url")
 	cmd.Flags().IntVarP(&o.concurrency, "concurrency", "c", runtime.NumCPU(), "Concurrency number")
+	cmd.Flags().BoolVar(&o.serial, "serial", false, "Serial execution, parallel by default")
 	return cmd
 }
 
@@ -77,12 +79,26 @@ func parseFile(fn string) ([]*Request, error) {
 	return requests, err
 }
 
+func removeEmptyLineAndComments(body []byte) []byte {
+	buf := bytes.NewBuffer(nil)
+	for _, line := range bytes.Split(body, []byte("\n")) {
+		line = bytes.TrimLeft(line, " ")
+		if len(line) == 0 || line[0] == '#' {
+			continue
+		}
+		buf.Write(line)
+		buf.WriteRune('\n')
+	}
+	return buf.Bytes()
+}
+
 func parseListFile(data []byte) ([]*Request, error) {
+	data = removeEmptyLineAndComments(data)
 	splits := bytes.Split(data, []byte("---\n"))
 	reg := regexp.MustCompile(`([a-zA-Z]+)\s+(\S+)`)
 	var requests []*Request
 	for i := range splits {
-		req, err := parseRaw(strings.TrimRight(strings.TrimLeft(string(splits[i]), " "), " "), reg)
+		req, err := parseRaw(bytes.TrimLeft(bytes.TrimRight(splits[i], " "), " "), reg)
 		if err != nil {
 			return nil, err
 		}
@@ -91,8 +107,8 @@ func parseListFile(data []byte) ([]*Request, error) {
 	return requests, nil
 }
 
-func parseRaw(data string, firstLineReg *regexp.Regexp) (*Request, error) {
-	splits := strings.SplitN(data, "\n", 2)
+func parseRaw(data []byte, firstLineReg *regexp.Regexp) (*Request, error) {
+	splits := bytes.SplitN(data, []byte("\n"), 2)
 	matches := firstLineReg.FindStringSubmatch(string(splits[0]))
 	if len(matches) != 3 {
 		return nil, fmt.Errorf("invalid format: %s", splits[0])
@@ -100,18 +116,23 @@ func parseRaw(data string, firstLineReg *regexp.Regexp) (*Request, error) {
 	return &Request{
 		Method:  matches[1],
 		URLPath: matches[2],
-		Body:    strings.TrimRight(strings.TrimLeft(string(splits[1]), " "), " "),
+		Body:    strings.TrimLeft(strings.TrimRight(string(splits[1]), " "), " "),
 	}, nil
 }
 
-func runBulkRequests(o *bulkRequestOptions, files ...string) error {
+func (o *bulkRequestOptions) Run(files ...string) error {
 	cli, err := o.commonOptions.complete()
 	if err != nil {
 		return err
 	}
 	errCh := make(chan error, o.concurrency)
+	doRequest := func(r *Request, wg *sync.WaitGroup) {
+		defer wg.Done()
+		_, err := r.doWithClient(cli)
+		errCh <- err
+	}
 	go func() {
-		var wg sync.WaitGroup
+		wg := &sync.WaitGroup{}
 		for i := range files {
 			requests, err := parseFile(files[i])
 			if err != nil {
@@ -119,11 +140,11 @@ func runBulkRequests(o *bulkRequestOptions, files ...string) error {
 			}
 			for j := range requests {
 				wg.Add(1)
-				go func(r *Request) {
-					defer wg.Done()
-					_, err := r.doWithClient(cli)
-					errCh <- err
-				}(requests[j])
+				if o.serial {
+					doRequest(requests[j], wg)
+				} else {
+					go doRequest(requests[j], wg)
+				}
 			}
 		}
 		wg.Wait()

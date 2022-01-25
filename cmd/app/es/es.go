@@ -96,17 +96,30 @@ func (c *client) validate() error {
 	return nil
 }
 
-func (c *client) doRequest(method, url string, data io.Reader, dryRun bool) ([]byte, error) {
+func (c *client) doRequest(method, url string, data io.Reader, dryRun bool) (body []byte, err error) {
+	start := time.Now()
+	defer func() {
+		log.GetLogger().Debugw("do request",
+			"method", method,
+			"url", url,
+			"dry-run", dryRun,
+			"duration", time.Since(start).String(),
+			"body", string(body),
+		)
+	}()
 	req, err := http.NewRequest(method, url, data)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Add("kbn-version", c.kbnVer)
-	c.setBasicAuthIfRequired(req)
 	if dryRun {
-		log.GetLogger().Infof("dryrun %s request to %s", method, url)
 		return nil, nil
 	}
+	req.Header.Add("kbn-version", c.kbnVer)
+	c.setBasicAuthIfRequired(req)
+	if data != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
 	delay := 500 * time.Microsecond
 
 	var resp *http.Response
@@ -123,7 +136,7 @@ func (c *client) doRequest(method, url string, data io.Reader, dryRun bool) ([]b
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err = ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
