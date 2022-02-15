@@ -25,6 +25,7 @@ type createOptions struct {
 	tsFieldName   string
 	namespace     string
 	filter        string
+	exclude       string
 	skipDotPrefix bool
 	override      bool
 	refresh       bool
@@ -56,6 +57,7 @@ func newCreatePatternCommand() *cobra.Command {
 	cmd.Flags().StringVar(&o.tsFieldName, "ts", "@timestamp", "Fieldname of timestamp")
 	cmd.Flags().StringVarP(&o.namespace, "namespace", "n", "default", "Kibana namespace")
 	cmd.Flags().StringVarP(&o.filter, "filter", "f", "", "Regexp pattern to filter, usually used to match prefix")
+	cmd.Flags().StringVar(&o.exclude, "exclude", "", "Regexp pattern to exclude")
 	cmd.Flags().BoolVar(&o.override, "override", false, "Overrides an existing index pattern if an index pattern with the provided title already exists")
 	cmd.Flags().BoolVar(&o.refresh, "refresh", false, "Reloads index pattern fields after the index pattern is stored")
 	cmd.Flags().BoolVar(&o.skipDotPrefix, "skip-dot-prefix", true, "Skip indices with `.` prefix")
@@ -72,7 +74,11 @@ func (o *createOptions) Run() (err error) {
 	if len(o.filter) > 0 {
 		filterPatternReg = regexp.MustCompile(o.filter)
 	}
-	indicePatterns, err := cli.listIndices(o.skipDotPrefix, filterPatternReg)
+	var excludePatternReg *regexp.Regexp
+	if len(o.exclude) > 0 {
+		excludePatternReg = regexp.MustCompile(o.exclude)
+	}
+	indicePatterns, err := cli.listIndices(o.skipDotPrefix, filterPatternReg, excludePatternReg)
 	if err != nil {
 		return fmt.Errorf("fetch indices: %s", err)
 	}
@@ -91,7 +97,7 @@ func (c *client) setBasicAuthIfRequired(req *http.Request) {
 	}
 }
 
-func (c *client) listIndices(skipDotPrefix bool, filterPatternReg *regexp.Regexp) ([]string, error) {
+func (c *client) listIndices(skipDotPrefix bool, filterPatternReg, excludePatternReg *regexp.Regexp) ([]string, error) {
 	c.esURL.Path = "/_cat/indices"
 	c.esURL.RawQuery = url.Values{"format": []string{"json"}}.Encode()
 	if filterPatternReg != nil {
@@ -118,7 +124,14 @@ func (c *client) listIndices(skipDotPrefix bool, filterPatternReg *regexp.Regexp
 		if indice.Status != "open" || (skipDotPrefix && strings.HasPrefix(indice.Index, ".")) {
 			continue
 		}
+		var skip bool
 		if filterPatternReg != nil && !filterPatternReg.Match([]byte(indice.Index)) {
+			skip = true
+		}
+		if excludePatternReg != nil && excludePatternReg.Match([]byte(indice.Index)) {
+			skip = true
+		}
+		if skip {
 			log.GetLogger().Debugf("skip pattern %s", indice.Index)
 			continue
 		}
